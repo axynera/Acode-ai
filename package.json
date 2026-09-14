@@ -1,14 +1,12 @@
 {
-  "name": "acode-claude-plugin",
-  "version": "1.1.0",
-  "description": "Chat with Claude (Anthropic) and run AI code actions directly inside the Acode editor.",
+  "name": "axynity-ai",
+  "version": "1.2.0",
+  "description": "Axynity AI for Acode with OpenAI Compatible and Anthropic Compatible APIs.",
   "main": "dist/main.js",
-  "repository": "https://github.com/CR4SH3UR/Acode-Claude-Plugin.git",
-  "author": "cr4sh3ur",
+  "repository": "https://github.com/axynera/Acode-ai.git",
+  "author": "Axynera",
   "license": "MIT",
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "acode-plugin-types": "^1.12.9",
     "esbuild": "^0.28.0",
