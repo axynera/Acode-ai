@@ -1,75 +1,85 @@
-import { createClient } from "./api.js";
-import { getSetting } from "./utils.js";
+import { fetchModels } from "./api.js";
+import { getSetting, setSetting } from "./utils.js";
 import { BASE_SYSTEM_PROMPT } from "./constants.js";
 
-let cachedClient = null;
-let cachedKey = null;
+let modelPromise = null;
 
-/** Active provider: "anthropic" (API key) or "openrouter" (OAuth sign-in). */
 export function getProvider() {
-  return getSetting("provider") === "openrouter" ? "openrouter" : "anthropic";
+  const provider = getSetting("provider");
+  return ["openai", "anthropic", "openrouter"].includes(provider) ? provider : "openai";
 }
 
-function anthropicClient() {
-  const key = (getSetting("apiKey") || "").trim();
-  if (!key) return null;
-  if (!cachedClient || cachedKey !== key) {
-    cachedClient = createClient(key);
-    cachedKey = key;
-  }
-  return cachedClient;
-}
-
-/** Drop the cached Anthropic client (call when the key/provider changes). */
 export function resetClient() {
-  cachedClient = null;
-  cachedKey = null;
+  modelPromise = null;
 }
 
-/** Whether the active provider currently has usable credentials. */
 export function isConnected() {
-  return getProvider() === "openrouter"
-    ? !!(getSetting("openrouterKey") || "").trim()
-    : !!(getSetting("apiKey") || "").trim();
+  const provider = getProvider();
+  if (provider === "openrouter") return !!(getSetting("openrouterKey") || "").trim();
+  return !!(getSetting("apiKey") || "").trim() && !!(getSetting("baseUrl") || "").trim();
 }
 
-/**
- * Connection descriptor for the active provider, or null (after warning the
- * user) when credentials are missing.
- * @returns {{provider:"anthropic",client:object}|{provider:"openrouter",key:string}|null}
- */
+/** Automatically resolve and cache the first model exposed by /models. */
+export async function resolveModel() {
+  if (getSetting("modelMode") === "manual") {
+    const model = (getSetting("model") || "").trim();
+    if (!model) throw new Error("Manual model is empty. Enter a model ID in settings.");
+    return model;
+  }
+
+  const provider = getProvider();
+  if (provider === "openrouter") return getSetting("model") || "claude-opus-5";
+
+  const cached = (getSetting("detectedModel") || "").trim();
+  if (cached) return cached;
+  if (!modelPromise) {
+    modelPromise = fetchModels(provider, getSetting("baseUrl"), getSetting("apiKey"))
+      .then((models) => {
+        const model = models[0];
+        setSetting("detectedModel", model);
+        return model;
+      })
+      .finally(() => { modelPromise = null; });
+  }
+  return modelPromise;
+}
+
+/** Refresh the auto-detected model list and select the first model. */
+export async function refreshModels() {
+  const provider = getProvider();
+  if (provider === "openrouter") return getSetting("model") || "claude-opus-5";
+  const models = await fetchModels(provider, getSetting("baseUrl"), getSetting("apiKey"));
+  const current = (getSetting("detectedModel") || "").trim();
+  const selected = current && models.includes(current) ? current : models[0];
+  setSetting("detectedModel", selected);
+  return selected;
+}
+
 export function requireConnection() {
   const provider = getProvider();
   if (provider === "openrouter") {
     const key = (getSetting("openrouterKey") || "").trim();
     if (!key) {
-      acode.require("toast")(
-        "Sign in with OpenRouter first — run “Claude: Connect” or use the button in the chat.",
-        4000,
-      );
+      acode.require("toast")("Sign in with OpenRouter first.", 4000);
       return null;
     }
-    return { provider, key };
+    return { provider, key, baseUrl: "https://openrouter.ai/api/v1" };
   }
-  const client = anthropicClient();
-  if (!client) {
-    acode.require("toast")(
-      "Add your Anthropic API key in settings, or switch the provider to OpenRouter sign-in.",
-      5000,
-    );
+
+  const key = (getSetting("apiKey") || "").trim();
+  const baseUrl = (getSetting("baseUrl") || "").trim();
+  if (!key || !baseUrl) {
+    acode.require("toast")("Set Base URL and API key in Axynity AI settings.", 5000);
     return null;
   }
-  return { provider: "anthropic", client };
+  return { provider, key, baseUrl };
 }
 
-/** Build the shared request options from current settings. */
 export function chatOptions(overrides = {}) {
   const custom = (getSetting("systemPrompt") || "").trim();
-  const system = custom
-    ? `${BASE_SYSTEM_PROMPT}\n\n${custom}`
-    : BASE_SYSTEM_PROMPT;
+  const system = custom ? `${BASE_SYSTEM_PROMPT}\n\n${custom}` : BASE_SYSTEM_PROMPT;
   return {
-    model: getSetting("model"),
+    model: getSetting("modelMode") === "manual" ? getSetting("model") : getSetting("detectedModel"),
     maxTokens: getSetting("maxTokens"),
     thinking: !!getSetting("extendedThinking"),
     streaming: !!getSetting("streaming"),
